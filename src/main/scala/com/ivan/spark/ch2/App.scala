@@ -17,34 +17,34 @@ object App {
     val config = new SparkConf(true)
     val sc = new SparkContext("local[2]", "Ivan Spark", config)
     val rawblocks: RDD[String] = sc.textFile("file:///D:/dev/projects/data/")
-    val head: Array[String] = rawblocks.take(10).filter(line => !isHeader(line))
-    val mds: Array[MatchData] = head.map(parse(_))
-    //val counters: Array[NAStatCounter] = statsV2(mds)
-    // println("counters")
-    //  counters.foreach(println(_))
-
+    //val head: Array[String] = rawblocks.take(10).filter(line => !isHeader(line))
     val parsed: RDD[MatchData] = rawblocks.filter(line => isHeader(line) == false).map(parse(_))
 
-    parsed.persist(StorageLevel.MEMORY_AND_DISK_SER_2)
+    parsed.persist(StorageLevel.MEMORY_ONLY_SER)
     parsed.count()
 
-    val grouped = mds.groupBy(md => md.matched)
-    //grouped.mapValues(arr => arr.size).foreach(println(_))
+    val countersMatched = NAStatCounter.statsWithMissingV2(parsed.filter(_.matched).map(_.scores))
+    val countersNotMatched = NAStatCounter.statsWithMissingV2(parsed.filter(!_.matched).map(_.scores))
 
-    val matchCounts: collection.Map[Boolean, Long] = parsed.map(md => md.matched).countByValue()
-    val matchCountSeq = matchCounts.toSeq
-    // 默认升序
-    //matchCountSeq.sortBy(_._2).foreach(println(_))
+    countersMatched.zip(countersNotMatched).map { case (x, y) =>
+      (x.missing + y.missing, x.stats.mean - y.stats.mean)
+    }.foreach(println)
 
-    // 降序
-    //matchCountSeq.sortBy(_._2).reverse.foreach(println(_))
-
-    // statsV1(parsed)
-    val scoresRDD = parsed.map(md => md.scores)
-    val counters = NAStatCounter.statsWithMissing(scoresRDD)
-    counters.foreach(println(_))
+    val scored = scoring(parsed)
+    scored.filter(s => s.score >= 4.3).map(s => s.md.matched).countByValue().foreach(println)
 
     System.in.read()
+  }
+
+  private def toScore(v: Double) = if (Double.NaN.equals(v)) 0 else v
+
+  case class Scored(md: MatchData, score: Double)
+
+  private def scoring(data: RDD[MatchData]) = {
+    data.map(md => {
+      val score = Array(2, 5, 6, 7, 8).map(i => toScore(md.scores(i))).sum
+      Scored(md, score)
+    })
   }
 
   // 统计每个score的概要信息

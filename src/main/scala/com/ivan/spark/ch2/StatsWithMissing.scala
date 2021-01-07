@@ -39,14 +39,17 @@ object NAStatCounter {
   }
 
   def statsWithMissingV2(rdd: RDD[Array[Double]]): Array[NAStatCounter] = {
-    val counterRDD = rdd.mapPartitions(iter => {
+    val counterRDD: RDD[Array[NAStatCounter]] = rdd.mapPartitions(iter => {
       // 每个分区的数据只需要创建一组（9个）NAStatCounter,然后用这组NAStatCounter（9个）去merge其它数据
-      val counters: Array[NAStatCounter] = iter.next().map(x => NAStatCounter(x))
-      val newCounters = iter.foreach((array: Array[Double]) => {
-        val zipped: Array[(Double, NAStatCounter)] = array.zip(counters)
-        return zipped.map(tup => tup._2.add(tup._1))
-      })
+      val counters = iter.next().map(x => NAStatCounter(x))
+      while (iter.hasNext) {
+        val array = iter.next()
+        (0 until counters.length).foreach(i => counters(i).add(array(i)))
+      }
+      Iterator(counters)
     })
-    counterRDD.reduce((x, y) => x.zip(y).map { case (a, b) => a.merge(b) })
+    counterRDD.reduce((x, y) => {
+      x.zip(y).map { case (a, b) => a.merge(b) }
+    })
   }
 }
