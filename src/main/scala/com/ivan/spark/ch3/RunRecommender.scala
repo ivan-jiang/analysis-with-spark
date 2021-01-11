@@ -1,17 +1,50 @@
 package com.ivan.spark.ch3
 
+import org.apache.spark.SparkContext
 import org.apache.spark.mllib.recommendation._
 import org.apache.spark.rdd.RDD
+import org.apache.spark.sql.functions._
+import org.apache.spark.sql.{Dataset, SparkSession}
 import org.apache.spark.storage.StorageLevel
-import org.apache.spark.{SparkConf, SparkContext}
 
-object App {
+object RunRecommender {
   def main(args: Array[String]): Unit = {
-    val config = new SparkConf(true)
-    val sc = new SparkContext("local[2]", "Ivan Spark", config)
-    start(sc)
+    val spark = SparkSession.builder()
+      .appName("Music Recommender")
+      .master("local[2]").getOrCreate()
 
-    System.in.read()
+    spark.sparkContext.setCheckpointDir("file:///spark")
+
+    val base = "file:///D:/dev/projects/data/c3/"
+    val rawUserAartistData = spark.read.textFile(base + "user_artist_data.txt")
+    val rawArtistData = spark.read.textFile(base + "artist_data.txt")
+    val rawArtistAlias = spark.read.textFile(base + "artist_alias.txt")
+
+    val recommender = new MusicRecommender(spark)
+    recommender.prepare(rawUserAartistData, rawArtistData, rawArtistAlias)
+
+    spark.stop()
+  }
+
+  class MusicRecommender(private val spark: SparkSession) {
+
+    import spark.implicits._
+
+    def prepare(
+                 rawUserArtistData: Dataset[String],
+                 rawArtistData: Dataset[String],
+                 rawArtistAlias: Dataset[String]
+               ): Unit = {
+      rawUserArtistData.take(5).foreach(println)
+
+      val userArtistDF = rawUserArtistData.map { line =>
+        val Array(user, artist, _*) = line.split(' ')
+        (user.toInt, artist.toInt)
+      }.toDF("user", "artist")
+
+      userArtistDF.agg(min("user"), max("user"), min("artist"), max("artist")).show()
+
+    }
   }
 
   private def start(sc: SparkContext): Unit = {
