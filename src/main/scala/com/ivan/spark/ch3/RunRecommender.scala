@@ -30,6 +30,30 @@ object RunRecommender {
 
     import spark.implicits._
 
+    private def buildArtistByID(rawArtistData: Dataset[String]) = {
+      rawArtistData.map { line =>
+        val (id, name) = line.span(_ != '\t')
+        if (name.isEmpty) {
+          None
+        } else {
+          try {
+            Some(id.toInt, name.trim)
+          } catch {
+            case e: NumberFormatException => None
+          }
+        }
+      }.toDF("id", "name")
+    }
+
+    def buildArtistAlias(rawArtistAlias: Dataset[String]) = {
+      val d: Map[Int, Int] = rawArtistAlias.map { line =>
+        val Array(x, y, _) = line.split('\t')
+        (x.toInt, y.toInt)
+      }.collect().toMap
+      d
+    }
+
+
     def prepare(
                  rawUserArtistData: Dataset[String],
                  rawArtistData: Dataset[String],
@@ -43,6 +67,10 @@ object RunRecommender {
       }.toDF("user", "artist")
 
       userArtistDF.agg(min("user"), max("user"), min("artist"), max("artist")).show()
+
+      val artistByID = buildArtistByID(rawArtistData)
+      var artistAlias = buildArtistAlias(rawArtistAlias)
+
 
     }
   }
