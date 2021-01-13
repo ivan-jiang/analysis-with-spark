@@ -1,28 +1,31 @@
 package com.ivan.spark.ch3
 
-import org.apache.spark.SparkContext
-import org.apache.spark.mllib.recommendation._
-import org.apache.spark.rdd.RDD
+import org.apache.spark.broadcast.Broadcast
+import org.apache.spark.ml.recommendation._
 import org.apache.spark.sql.functions._
-import org.apache.spark.sql.{Dataset, SparkSession}
-import org.apache.spark.storage.StorageLevel
+import org.apache.spark.sql.{DataFrame, Dataset, SparkSession}
+
+import scala.util.Random
 
 object RunRecommender {
   def main(args: Array[String]): Unit = {
     val spark = SparkSession.builder()
       .appName("Music Recommender")
+      .config("spark.sql.crossJoin.enabled", true)
       .master("local[2]").getOrCreate()
 
     spark.sparkContext.setCheckpointDir("file:///spark")
 
     val base = "file:///D:/dev/projects/data/c3/"
-    val rawUserAartistData = spark.read.textFile(base + "user_artist_data.txt")
+    val rawUserArtistData: Dataset[String] = spark.read.textFile(base + "user_artist_data.txt")
     val rawArtistData = spark.read.textFile(base + "artist_data.txt")
     val rawArtistAlias = spark.read.textFile(base + "artist_alias.txt")
 
     val recommender = new MusicRecommender(spark)
-    recommender.prepare(rawUserAartistData, rawArtistData, rawArtistAlias)
+    recommender.prepare(rawUserArtistData, rawArtistData, rawArtistAlias)
+    recommender.model(rawUserArtistData)
 
+    System.in.read
     spark.stop()
   }
 
@@ -30,8 +33,81 @@ object RunRecommender {
 
     import spark.implicits._
 
+    private var userArtistData: DataFrame = _
+    private var artistByID: DataFrame = _
+    private var artistAlias: Map[Int, Int] = _
+
+    def prepare(
+                 rawUserArtistData: Dataset[String],
+                 rawArtistData: Dataset[String],
+                 rawArtistAlias: Dataset[String]
+               ): Unit = {
+      rawUserArtistData.take(5).foreach(println)
+
+      userArtistData = rawUserArtistData.map { line =>
+        val Array(user, artist, count) = line.split(' ').map(_.toInt)
+        (user, artist, count)
+      }.toDF("user", "artist", "count")
+
+      userArtistData.agg(min("user"), max("user"),
+        min("artist"), max("artist"),
+        min("count"), max("count"), mean("count")).show()
+
+      artistByID = buildArtistByID(rawArtistData)
+      artistAlias = buildArtistAlias(rawArtistAlias)
+
+      val (badID, goodID) = artistAlias.head
+      artistByID.filter($"id" isin(badID, goodID)).show()
+    }
+
+    def makeRecommendation(model: ALSModel, userID: Int, top: Int) = {
+      val topRecommend = model.itemFactors
+        .select($"id" as ("artist"))
+        .withColumn("user", lit(userID))
+
+      model.transform(topRecommend)
+        .select("artist", "prediction")
+        .orderBy($"prediction".desc)
+        .limit(top)
+    }
+
+    def model(rawUserArtistData: Dataset[String]) = {
+      val bArtistAlias: Broadcast[Map[Int, Int]] = spark.sparkContext.broadcast(artistAlias)
+      val trainData = buildCounts(rawUserArtistData, bArtistAlias.value).cache()
+
+      val model = new ALS()
+        .setSeed(Random.nextLong())
+        .setRank(10)
+        .setAlpha(0.1)
+        .setRegParam(0.01)
+        .setImplicitPrefs(true)
+        .setUserCol("user")
+        .setItemCol("artist")
+        .setRatingCol("count")
+        .setPredictionCol("prediction")
+        .fit(trainData)
+
+      trainData.unpersist()
+      model.userFactors.select("features").show(false)
+
+      val userID = 2093760
+      val existingArtistIDs: Array[Int] = trainData.filter($"user" === userID).select("artist").as[Int].collect()
+      artistByID.filter($"id" isin (existingArtistIDs: _*)).show()
+
+      val recommendation = makeRecommendation(model, userID, 5)
+      recommendation.show()
+    }
+
+    private def buildCounts(rawUserArtistData: Dataset[String], artistAlias: Map[Int, Int]) = {
+      rawUserArtistData.map { line =>
+        var Array(user, artist, count) = line.split(' ').map(_.toInt)
+        artist = artistAlias.getOrElse(artist, artist)
+        (user, artist, count)
+      }.toDF("user", "artist", "count")
+    }
+
     private def buildArtistByID(rawArtistData: Dataset[String]) = {
-      rawArtistData.map { line =>
+      rawArtistData.flatMap { line =>
         val (id, name) = line.span(_ != '\t')
         if (name.isEmpty) {
           None
@@ -46,99 +122,15 @@ object RunRecommender {
     }
 
     def buildArtistAlias(rawArtistAlias: Dataset[String]) = {
-      val d: Map[Int, Int] = rawArtistAlias.map { line =>
-        val Array(x, y, _) = line.split('\t')
-        (x.toInt, y.toInt)
-      }.collect().toMap
-      d
-    }
-
-
-    def prepare(
-                 rawUserArtistData: Dataset[String],
-                 rawArtistData: Dataset[String],
-                 rawArtistAlias: Dataset[String]
-               ): Unit = {
-      rawUserArtistData.take(5).foreach(println)
-
-      val userArtistDF = rawUserArtistData.map { line =>
-        val Array(user, artist, _*) = line.split(' ')
-        (user.toInt, artist.toInt)
-      }.toDF("user", "artist")
-
-      userArtistDF.agg(min("user"), max("user"), min("artist"), max("artist")).show()
-
-      val artistByID = buildArtistByID(rawArtistData)
-      var artistAlias = buildArtistAlias(rawArtistAlias)
-
-
-    }
-  }
-
-  private def start(sc: SparkContext): Unit = {
-    val rawUserAartistData: RDD[String] = sc.textFile("file:///D:/dev/projects/data/c3/user_artist_data.txt", 10)
-    val col0 = rawUserAartistData.map(line => line.split(" ")(0).toDouble).stats()
-    val col1 = rawUserAartistData.map((line => line.split(" ")(1).toDouble)).stats()
-
-    val artistById = readArtist(sc).collectAsMap()
-    val artistAlias: collection.Map[Int, Int] = readArtistAlias(sc)
-    val bArtistById = sc.broadcast(artistById)
-
-
-    val bArtistAlias = sc.broadcast(artistAlias)
-    val trainData = rawUserAartistData.map(line => {
-      val Array(userID, artistID, count) = line.split(' ').map(_.toInt)
-      val finalArtistID = bArtistAlias.value.getOrElse(artistID, artistID)
-      Rating(userID, finalArtistID, count)
-    }).persist(StorageLevel.MEMORY_ONLY_SER).setName("trainData")
-
-    val model: MatrixFactorizationModel = ALS.trainImplicit(trainData, 10, 5, 0.01, 1.0)
-    // 打印用户矩阵的第1行(10个隐特征)
-    println(model.userFeatures.mapValues(_.mkString(",")).first())
-
-    val userID = 2093760
-    val ratingForUser = trainData.filter(r => r.user == userID)
-      .map(r => r.product).collect().toSet
-
-    println(s"user ${userID} 过去听过这些艺术家的作品")
-    bArtistById.value.filter { case (id, _) => ratingForUser.contains(id) }
-      .foreach(println(_))
-
-    println(s"为user ${userID} 推荐的艺术家")
-    val recommendations: Array[Rating] = model.recommendProducts(userID, 5)
-    val recommendArtists = recommendations.map(r => artistById.getOrElse(r.product, ""))
-    println(recommendArtists.mkString(","))
-  }
-
-
-  private def readArtist(sc: SparkContext) = {
-    val rawArtistData = sc.textFile("file:///D:/dev/projects/data/c3/artist_data.txt")
-    val artistById: RDD[(Int, String)] = rawArtistData.flatMap(line => {
-      val (id, name) = line.span(_ != '\t')
-      if (name.isEmpty) {
-        None
-      } else {
-        try {
-          Some(id.toInt, name.trim)
-        } catch {
-          case e: NumberFormatException => None
+      rawArtistAlias.flatMap { line =>
+        val Array(artist, alias) = line.split('\t')
+        if (artist.isEmpty) {
+          None
+        } else {
+          Some(artist.toInt, alias.toInt)
         }
-      }
-    })
-    //println(artistById.count())
-    artistById
+      }.collect().toMap
+    }
   }
 
-  private def readArtistAlias(sc: SparkContext) = {
-    val rawArtistAlias = sc.textFile("file:///D:\\dev\\projects\\data\\c3\\artist_alias.txt")
-    val alias: collection.Map[Int, Int] = rawArtistAlias.flatMap(line => {
-      val parts = line.split('\t')
-      if (parts(0).isEmpty) {
-        None
-      } else {
-        Some(parts(0).toInt, parts(1).toInt)
-      }
-    }).collectAsMap()
-    alias
-  }
 }
