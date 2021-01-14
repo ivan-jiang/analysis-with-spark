@@ -1,0 +1,18 @@
+{
+  "name": {
+    "first": "lei",
+    "last": "li"
+  },
+  "gender": "male",
+  "address": "shenzhen",
+  "phone": "13300000000"
+}
+{
+  "name": {
+    "first": "meimei",
+    "last": "han"
+  },
+  "gender": "female",
+  "address": "guangzhou",
+  "phone": "13300000000"
+}
