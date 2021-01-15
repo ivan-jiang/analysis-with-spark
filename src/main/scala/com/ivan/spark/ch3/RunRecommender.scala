@@ -3,7 +3,7 @@ package com.ivan.spark.ch3
 import org.apache.spark.broadcast.Broadcast
 import org.apache.spark.ml.recommendation._
 import org.apache.spark.sql.functions._
-import org.apache.spark.sql.{DataFrame, Dataset, Row, SparkSession}
+import org.apache.spark.sql.{DataFrame, Dataset, SparkSession}
 
 import scala.collection.mutable.ArrayBuffer
 import scala.util.Random
@@ -204,7 +204,7 @@ object RunRecommender {
       meanAUC
     }
 
-    private def predictMostListened(trainData: Dataset[Row])(allData: DataFrame) = {
+    private def predictMostListened(trainData: DataFrame)(allData: DataFrame) = {
       val listenCounts = trainData.groupBy("artist")
         .agg(sum("count") as "prediction")
         .select("artist", "prediction")
