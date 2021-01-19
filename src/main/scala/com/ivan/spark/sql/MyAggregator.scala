@@ -47,6 +47,5 @@ object MyAggregator extends Aggregator[Order, Stats, Result] {
     val statsColumn = MyAggregator.toColumn.name("stats")
     val stats = df.select(statsColumn)
     stats.printSchema()
-    stats.show()
   }
 }

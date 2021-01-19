@@ -46,7 +46,7 @@ object MyAverage extends UserDefinedAggregateFunction {
     df.createOrReplaceTempView("employees")
     df.show()
 
-    val result = spark.sql("select myAvg(salary) as avg_salary from employees")
+    val result = spark.sql("select name, myAvg(salary) as avg_salary from employees group by name")
     result.show()
   }
 }

@@ -8,7 +8,7 @@ import org.apache.spark.sql.{DataFrame, Dataset, SparkSession}
 import scala.collection.mutable.ArrayBuffer
 import scala.util.Random
 
-object RunRecommender {
+object RecommendRunner {
   def main(args: Array[String]): Unit = {
     val spark = SparkSession.builder()
       .appName("Music Recommender")
@@ -59,7 +59,7 @@ object RunRecommender {
       artistAlias = buildArtistAlias(rawArtistAlias)
 
       val (badID, goodID) = artistAlias.head
-      artistByID.filter($"id" isin(badID, goodID)).show()
+      artistByID.filter($"id".isin(badID, goodID)).show()
     }
 
     def makeRecommendation(model: ALSModel, userID: Int, top: Int) = {
@@ -122,7 +122,7 @@ object RunRecommender {
       val mostListenedAUC = meanAUC(cvData, bAllArtistIDs, predictFunction)
       println(mostListenedAUC)
 
-      val evaluations =
+      val evaluations: Seq[(Double, (Int, Double, Double))] =
         for (rank <- Seq(5, 30);
              regParam <- Seq(1.0, 0.0001);
              alpha <- Seq(1.0, 40.0))
