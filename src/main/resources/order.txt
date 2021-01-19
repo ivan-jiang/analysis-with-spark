@@ -1,0 +1,3 @@
+1,apple notebook,1,20000
+2,dell notebook,2,10000
+3,thinkpad T490,2,30000
