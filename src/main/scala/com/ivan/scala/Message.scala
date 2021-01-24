@@ -54,6 +54,7 @@ object Message {
     println(msg.last)
     println(msg)
     println(msg.take(3))
+
   }
 
   def fromSeq(buf: Seq[Base]): Message = {
@@ -67,7 +68,7 @@ object Message {
   def apply(bases: Base*): Message = fromSeq(bases)
 
   def newBuilder: Builder[Base, Message] =
-    new ArrayBuffer[Base]().mapResult(fromSeq)
+    new ArrayBuffer[Base].mapResult(fromSeq)
 
   implicit def canBuildFrom: CanBuildFrom[Message, Base, Message] = {
     new CanBuildFrom[Message, Base, Message] {
