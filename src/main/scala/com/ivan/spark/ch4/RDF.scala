@@ -3,6 +3,8 @@ package com.ivan.spark.ch4
 import org.apache.spark.ml.classification.DecisionTreeClassifier
 import org.apache.spark.ml.evaluation.MulticlassClassificationEvaluator
 import org.apache.spark.ml.feature.VectorAssembler
+import org.apache.spark.ml.tuning.{ParamGridBuilder, TrainValidationSplit}
+import org.apache.spark.ml.{Pipeline, PipelineModel}
 import org.apache.spark.mllib.evaluation.MulticlassMetrics
 import org.apache.spark.sql.types.DoubleType
 import org.apache.spark.sql.{DataFrame, SparkSession}
@@ -42,7 +44,7 @@ object RDF {
     val runRDF = new RunRDF(spark)
     runRDF.simpleDecisionTree(trainData, testData)
     runRDF.randomClassifier(trainData, testData)
-
+    runRDF.evaluate(trainData, testData)
     trainData.unpersist()
     testData.unpersist()
   }
@@ -119,5 +121,58 @@ class RunRDF(private val spark: SparkSession) {
         case (trainProb, testProb) => trainProb * testProb
       }.sum
     println("accuracy_2 " + accuracy)
+  }
+
+  def evaluate(trainData: DataFrame, testData: DataFrame): Unit = {
+    val inputCols = trainData.columns.filter(_ != "Cover_Type")
+    val assembler = new VectorAssembler()
+      .setInputCols(inputCols)
+      .setOutputCol("featureVector")
+    val classifier = new DecisionTreeClassifier()
+      .setSeed(Random.nextLong())
+      .setLabelCol("Cover_Type")
+      .setFeaturesCol("featureVector")
+      .setPredictionCol("prediction")
+
+    val pipeline = new Pipeline()
+      .setStages(Array(assembler, classifier))
+    val paramGrid = new ParamGridBuilder()
+      .addGrid(classifier.impurity, Seq("gini", "entropy"))
+      .addGrid(classifier.maxDepth, Seq(1, 20))
+      .addGrid(classifier.maxBins, Seq(40, 300))
+      .addGrid(classifier.minInfoGain, Seq(0.0, 0.05))
+      .build()
+
+    val multiclassEval = new MulticlassClassificationEvaluator()
+      .setLabelCol("Cover_Type")
+      .setPredictionCol("prediction")
+      .setMetricName("accuracy")
+
+    val validator = new TrainValidationSplit()
+      .setSeed(Random.nextLong())
+      .setEstimator(pipeline)
+      .setEvaluator(multiclassEval)
+      .setEstimatorParamMaps(paramGrid)
+      .setTrainRatio(0.9)
+
+    val validatorModel = validator.fit(trainData)
+    val paramsAndMetrics = validatorModel.validationMetrics
+      .zip(validatorModel.getEstimatorParamMaps)
+      .sortBy(_._1).reverse
+    paramsAndMetrics.foreach { case (metric, params) =>
+      println(metric)
+      println(params)
+      println()
+    }
+
+    val bestModel = validatorModel.bestModel
+    println(bestModel.asInstanceOf[PipelineModel].stages.last.extractParamMap())
+    println(validatorModel.validationMetrics.max)
+
+    val predictionsForTestData = bestModel.transform(testData)
+    val predictionsForTrainData = bestModel.transform(trainData)
+    val testAccuracy = multiclassEval.evaluate(predictionsForTestData)
+    val trainAccuracy = multiclassEval.evaluate(predictionsForTrainData)
+    println("trainAccuracy " + trainAccuracy + ", testAccuracy" + testAccuracy)
   }
 }
