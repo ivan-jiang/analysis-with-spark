@@ -29,7 +29,6 @@ object App {
     countersMatched.zip(countersNotMatched).map { case (x, y) =>
       (x.missing + y.missing, x.stats.mean - y.stats.mean)
     }.foreach(println)
-
     val scored = scoring(parsed)
     scored.filter(s => s.score >= 4.3).map(s => s.md.matched).countByValue().foreach(println)
 

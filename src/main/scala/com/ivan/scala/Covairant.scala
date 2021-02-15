@@ -20,6 +20,6 @@ class Level3 extends Level2 {}
 class Level4 extends Level3 {}
 
 class Consumer[-IN, +OUT] {
-  def m1[U >: OUT](): U = new OUT // 协变，下界
+  def m1[U >: OUT]() = println() // 协变，下界
   def m2[U <: IN](u: U) = println(u) // 逆变，上界
 }
