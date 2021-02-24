@@ -5,7 +5,11 @@ import org.apache.spark.sql.SparkSession
 
 object App {
   def main(args: Array[String]): Unit = {
-    val spark = SparkSession.builder().master("local[2]").appName("Ivan App").getOrCreate()
+    val spark = SparkSession.builder().master("local[2]")
+      .config("spark.scheduler.mode", "fair")
+      .config("spark.scheduler.allocation.file", "D:\\dev\\projects\\my\\analysis-with-spark\\src\\main\\resources\\fairscheduler.xml")
+      .appName("Ivan App")
+      .getOrCreate()
     val rdd = spark.sparkContext.parallelize(Seq("hello", "world", "spark", "apache", "world", "spark"))
     val wordCount = rdd.map((w => (w, 1)))
     wordCount.groupByKey().map { case (w, seq) => (w, seq.size) }.foreach(println)
